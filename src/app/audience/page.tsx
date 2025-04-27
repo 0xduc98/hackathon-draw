@@ -2,10 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
-import p5 from 'p5';
+import * as fabric from 'fabric';
 import { mqttClient } from '@/utils/mqtt';
-import { Button, Input, Card, message } from 'antd';
-import { ClearOutlined } from '@ant-design/icons';
+import { Button, Input, message } from 'antd';
+import { ClearOutlined, DeleteOutlined } from '@ant-design/icons';
+import { useMutation } from '@tanstack/react-query';
+import { postDrawing } from '@/api';
+import { publishMQTT } from '@/utils/mqttClient';
 
 export default function AudiencePage() {
   const searchParams = useSearchParams();
@@ -16,15 +19,28 @@ export default function AudiencePage() {
   const [penColor, setPenColor] = useState('#000000');
   const [penSize, setPenSize] = useState(5);
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [imageSize, setImageSize] = useState<{ width: number; height: number } | null>(null);
   const [isDrawingTime, setIsDrawingTime] = useState(false);
   const [countdownTime, setCountdownTime] = useState<number | null>(null);
   const [isEraser, setIsEraser] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [title, setTitle] = useState('');
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const p5Instance = useRef<p5 | null>(null);
-  const isDrawingRef = useRef(false);
-  const currentPointsRef = useRef<{ x: number; y: number }[]>([]);
+  
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
+
+  // Load image and get its size
+  useEffect(() => {
+    if (referenceImage) {
+      const img = new window.Image();
+      img.onload = () => {
+        setImageSize({ width: img.naturalWidth, height: img.naturalHeight });
+      };
+      img.src = referenceImage;
+    } else {
+      setImageSize(null);
+    }
+  }, [referenceImage]);
 
   useEffect(() => {
     if (!activityId || !audienceId || !audienceName) {
@@ -56,105 +72,103 @@ export default function AudiencePage() {
       }
     });
 
-    if (canvasRef.current && !p5Instance.current) {
-      const sketch = (p: p5) => {
-        let lastX = 0;
-        let lastY = 0;
+    // Setup Fabric.js canvas
+    if (canvasRef.current && !fabricCanvasRef.current) {
+      const canvas = new fabric.Canvas(canvasRef.current, {
+        isDrawingMode: true,
+        width: 400,
+        height: 500
+      });
 
-        p.setup = () => {
-          const canvas = p.createCanvas(
-            Math.min(window.innerWidth * 0.9, 400),
-            Math.min(window.innerWidth * 0.9, 400)
-          );
-          canvas.parent(canvasRef.current!);
-          p.background(255);
-        };
+      fabricCanvasRef.current = canvas;
 
-        p.draw = () => {
-          if (isDrawingRef.current && isDrawingTime) {
-            p.stroke(isEraser ? '#fff' : penColor);
-            p.strokeWeight(penSize);
-            p.line(lastX, lastY, p.mouseX, p.mouseY);
-            lastX = p.mouseX;
-            lastY = p.mouseY;
-            currentPointsRef.current.push({ x: p.mouseX, y: p.mouseY });
-          }
-        };
+      // Set initial brush settings
+      if (canvas.freeDrawingBrush) {
+        const brush = canvas.freeDrawingBrush as fabric.BaseBrush;
+        brush.width = penSize;
+        brush.color = penColor;
+      }
 
-        p.mousePressed = () => {
-          if (isDrawingTime) {
-            isDrawingRef.current = true;
-            lastX = p.mouseX;
-            lastY = p.mouseY;
-            currentPointsRef.current = [{ x: p.mouseX, y: p.mouseY }];
-          }
-        };
-
-        p.mouseReleased = () => {
-          if (isDrawingRef.current) {
-            isDrawingRef.current = false;
-          }
-        };
-
-        p.windowResized = () => {
-          p.resizeCanvas(
-            Math.min(window.innerWidth * 0.9, 400),
-            Math.min(window.innerWidth * 0.9, 400)
-          );
-        };
+      // Handle window resize
+      const handleResize = () => {
+        const width = imageSize?.width || Math.min(window.innerWidth * 0.9, 400);
+        const height = imageSize?.height || Math.min(window.innerWidth * 0.9, 400);
+        canvas.setWidth(width);
+        canvas.setHeight(height);
       };
 
-      p5Instance.current = new p5(sketch);
-
-      const canvas = canvasRef.current?.querySelector('canvas');
-      if (canvas) {
-        canvas.addEventListener('mouseleave', () => {
-          isDrawingRef.current = false;
-        });
-      }
+      window.addEventListener('resize', handleResize);
+      return () => {
+        window.removeEventListener('resize', handleResize);
+        canvas.dispose();
+      };
     }
 
     return () => {
-      if (p5Instance.current) {
-        p5Instance.current.remove();
-        p5Instance.current = null;
-      }
       mqttClient.disconnect();
     };
-  }, [activityId, audienceId, audienceName, penColor, penSize, isDrawingTime, isEraser]);
+  }, [activityId, audienceId, audienceName, imageSize]);
+
+  // Update brush settings when they change
+  useEffect(() => {
+    if (fabricCanvasRef.current?.freeDrawingBrush) {
+      const brush = fabricCanvasRef.current.freeDrawingBrush as fabric.BaseBrush;
+      brush.width = penSize;
+      brush.color = isEraser ? '#ffffff' : penColor;
+    }
+  }, [penColor, penSize, isEraser]);
 
   const clearCanvas = () => {
-    if (p5Instance.current) {
-      p5Instance.current.background(255);
+    if (fabricCanvasRef.current) {
+      fabricCanvasRef.current.clear();
     }
   };
 
-  const handleSubmit = () => {
+  // Mutation for submitting drawing
+  const submitMutation = useMutation({
+    mutationFn: postDrawing,
+    onSuccess: (data) => {
+      publishMQTT(`presenter/slide/${activityId}`, {
+        type: 'image',
+        image: data.imageData,
+        audienceId,
+        audienceName,
+      });
+      message.success('Submitted!');
+    },
+    onError: () => {
+      message.error('Failed to save drawing');
+    }
+  });
+
+  const handleSubmit = async () => {
     if (!isDrawingTime) return;
     setIsSubmitting(true);
-    const canvas = document.querySelector('canvas');
-    if (canvas) {
-      const base64Image = (canvas as HTMLCanvasElement).toDataURL('image/png');
-      mqttClient.publish(
-        `presenter/slide/${activityId}`,
-        JSON.stringify({
-          type: 'image',
-          image: base64Image,
+    try {
+      if (fabricCanvasRef.current) {
+        const base64Image = fabricCanvasRef.current.toDataURL({
+          format: 'png',
+          quality: 1,
+          multiplier: 1
+        });
+        submitMutation.mutate({
+          slideId: activityId,
           audienceId,
           audienceName,
-        })
-      );
-      message.success('Submitted!');
+          imageData: base64Image,
+        });
+      }
+    } finally {
+      setIsSubmitting(false);
     }
-    setIsSubmitting(false);
   };
 
   return (
     <div className="min-h-screen bg-[#6c1cd1] flex flex-col items-center px-2 py-4">
       {/* Title/Question */}
       <div className="w-full max-w-[500px] flex flex-col items-center mb-4">
-        <div className="rounded-lg bg-[#2d014d] text-white px-6 py-3 text-center text-lg font-semibold shadow-md mb-2" style={{ opacity: title ? 1 : 0 }}>
-          {title}
+        <div className="rounded-lg bg-[#2d014d] text-white px-6 py-3 text-center text-lg font-semibold shadow-md mb-2">
+          {title || 'Waiting for question...'}
         </div>
         {countdownTime !== null && isDrawingTime && (
           <div className="text-white text-base font-bold mb-2">
@@ -163,56 +177,68 @@ export default function AudiencePage() {
         )}
       </div>
 
-      {/* Reference Image */}
-      {referenceImage && (
-        <Card
-          className="mb-4 flex flex-col items-center"
-          style={{
-            borderRadius: 20,
-            maxWidth: 400,
-            width: '90vw',
-            margin: '0 auto',
-            boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-          }}
-          bodyStyle={{ padding: 12, display: 'flex', justifyContent: 'center' }}
-        >
+      {/* Drawing Area with image background if present */}
+      <div
+        style={{
+          position: 'relative',
+          width: imageSize?.width || Math.min(window.innerWidth * 0.9, 400),
+          height: imageSize?.height || Math.min(window.innerWidth * 0.9, 400),
+          marginBottom: 16,
+        }}
+      >
+        {referenceImage && imageSize && (
           <img
             src={referenceImage}
             alt="Reference"
             style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
               width: '100%',
-              maxWidth: 360,
-              borderRadius: 12,
+              height: '100%',
               objectFit: 'contain',
-              margin: '0 auto',
-              display: 'block',
+              opacity: 0.5,
+              zIndex: 1,
+              pointerEvents: 'none',
+              borderRadius: 12,
             }}
           />
-        </Card>
-      )}
-
-      {/* Drawing Canvas */}
-      <div
-        ref={canvasRef}
-        className="bg-white rounded-xl shadow-md flex items-center justify-center mb-3"
-        style={{
-          width: '90vw',
-          maxWidth: 400,
-          height: '90vw',
-          maxHeight: 400,
-          minHeight: 200,
-        }}
-      />
+        )}
+        <canvas
+          ref={canvasRef}
+          className="bg-white rounded-xl shadow-md"
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: '100%',
+            height: '100%',
+            zIndex: 2,
+          }}
+        />
+      </div>
 
       {/* Drawing Controls */}
       <div className="flex flex-row items-center justify-center gap-2 w-full max-w-[400px] mb-4">
         <Button
-          icon={<ClearOutlined />}
+          icon={<DeleteOutlined />}
           onClick={clearCanvas}
           size="large"
           shape="circle"
-          aria-label="Clear"
-        />
+          aria-label="Delete All"
+        >
+          Delete All
+        </Button>
+        <Button
+          icon={<ClearOutlined />}
+          onClick={() => setIsEraser((v) => !v)}
+          type={isEraser ? 'primary' : 'default'}
+          size="large"
+          shape="circle"
+          aria-label="Eraser"
+        >
+          Erase
+        </Button>
         <input
           type="color"
           value={penColor}
@@ -228,19 +254,11 @@ export default function AudiencePage() {
           min={2}
           max={30}
           value={penSize}
-          onChange={(e) => setPenSize(Number(e.target.value))}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPenSize(Number(e.target.value))}
           className="w-24"
           aria-label="Pen Size"
+          style={{ fontSize: 18, touchAction: 'none', WebkitTapHighlightColor: 'transparent', WebkitUserSelect: 'none' }}
         />
-        <Button
-          onClick={() => setIsEraser((v) => !v)}
-          type={isEraser ? 'primary' : 'default'}
-          size="large"
-          shape="circle"
-          aria-label="Eraser"
-        >
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="13" width="14" height="3" rx="1.5" fill="#aaa"/><rect x="5" y="4" width="10" height="8" rx="2" fill="#fff" stroke="#aaa" strokeWidth="1.5"/></svg>
-        </Button>
       </div>
 
       {/* Submit Button */}
