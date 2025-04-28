@@ -154,4 +154,14 @@ export async function postDrawing({
     console.error('Error posting drawing:', error);
     throw new Error("Failed to post drawing");
   }
+}
+
+export async function uploadImageToS3({ imageData, fileName }: { imageData: string; fileName: string }) {
+  try {
+    const response = await api.post('/upload', { imageData, fileName });
+    return response.data;
+  } catch (error) {
+    console.error('Error uploading image to S3:', error);
+    throw new Error('Failed to upload image to S3');
+  }
 } 

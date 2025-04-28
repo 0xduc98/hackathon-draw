@@ -1,394 +1,221 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { mqttClient } from '@/utils/mqtt';
-import { Button, Input, Upload, message, Image, List, Card, Space, Typography, Tooltip, Row, Col, Divider } from 'antd';
-import { UploadOutlined, DeleteOutlined, ClockCircleOutlined, UserOutlined, PlayCircleOutlined, StopOutlined, EditOutlined } from '@ant-design/icons';
-import debounce from 'lodash/debounce';
+import { Layout, Card, Button, Typography, message, Upload, Row, Col, Input, Select, Form, Spin } from 'antd';
+import { UploadOutlined } from '@ant-design/icons';
 import { useSlideStore } from '@/store/slideStore';
-import { getDrawingsBySlideId, Drawing } from '@/api';
+import { mqttClient } from '@/utils/mqtt';
+import { updateSlideSettings } from '@/api';
+import debounce from 'lodash/debounce';
+import { useQuery } from '@tanstack/react-query';
 
-const { Title, Text } = Typography;
+const { Content } = Layout;
+const { Title } = Typography;
 
-interface MQTTMessage {
-  type: 'title_update' | 'reference_image' | 'countdown_start' | 'countdown_update' | 'countdown_end' | 'image';
-  title?: string;
-  image?: string;
-  duration?: number;
-  remainingTime?: number;
-  audienceId?: string;
-  audienceName?: string;
+interface FormValues {
+  title: string;
+  countdownDuration: number;
+  referenceImage: string | null;
 }
 
-interface Submission {
-  id: string;
-  image: string;
-  audienceId: string;
-  audienceName: string;
-  timestamp: number;
-}
+const MQTT_TOPIC_PREFIX = 'presenter/slide';
 
 export default function EditPage() {
   const searchParams = useSearchParams();
-  const activityId = searchParams.get('activityId');
-  const [countdownDuration, setCountdownDuration] = useState(60);
-  const [isSessionActive, setIsSessionActive] = useState(false);
-  const [countdownInterval, setCountdownInterval] = useState<NodeJS.Timeout | null>(null);
-  const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [historicalSubmissions, setHistoricalSubmissions] = useState<Drawing[]>([]);
-  const { fetchSlideData } = useSlideStore();
+  const slideId = searchParams.get('slideId');
+  const [form] = Form.useForm<FormValues>();
+  const { fetchSlideData, title, countdownTime, referenceImage } = useSlideStore();
+
+  const { isLoading } = useQuery({
+    queryKey: ['slide', slideId],
+    queryFn: () => fetchSlideData(slideId!),
+    enabled: !!slideId,
+  });
+
+  const getMqttTopic = useCallback(() => {
+    if (!slideId) return '';
+    return `${MQTT_TOPIC_PREFIX}/${slideId}`;
+  }, [slideId]);
 
   useEffect(() => {
-    if (!activityId) {
-      message.error('Missing activity ID');
+    form.setFieldsValue({
+      title: title,
+      countdownDuration: countdownTime || undefined,
+      referenceImage: referenceImage
+    });
+  }, [title, countdownTime, referenceImage, form]);
+
+  useEffect(() => {
+    if (!slideId) {
+      console.error('Missing required parameter: slideId');
+      message.error('Missing required parameter: slideId');
       return;
     }
 
-    // Fetch slide data when page loads
-    fetchSlideData(activityId);
-
-    const topic = `presenter/slide/${activityId}`;
+    const topic = getMqttTopic();
     console.log('Subscribing to topic:', topic);
-    
-    mqttClient.subscribe(topic, (message) => {
-      try {
-        console.log('Received MQTT message:', message);
-        const data = JSON.parse(message) as MQTTMessage;
-        console.log('Parsed MQTT data:', data);
-        
-        if (data.type === 'title_update') {
-          const titleInput = document.getElementById('title-input') as HTMLInputElement;
-          if (titleInput) {
-            titleInput.value = data.title || '';
-          }
-        } else if (data.type === 'image') {
-          console.log('Received image submission:', {
-            hasImage: !!data.image,
-            imageLength: data.image?.length,
-            audienceId: data.audienceId,
-            audienceName: data.audienceName
-          });
-          
-          if (data.image && data.audienceId && data.audienceName) {
-            const newSubmission: Submission = {
-              id: `${data.audienceId}-${Date.now()}`,
-              image: data.image,
-              audienceId: data.audienceId,
-              audienceName: data.audienceName,
-              timestamp: Date.now()
-            };
-            setSubmissions(prev => [newSubmission, ...prev]);
-            message.success(`New submission from ${data.audienceName}`);
-          } else {
-            console.error('Invalid image submission data:', {
-              missingImage: !data.image,
-              missingAudienceId: !data.audienceId,
-              missingAudienceName: !data.audienceName,
-              data
-            });
-          }
-        }
-      } catch (error) {
-        console.error('Error parsing MQTT message:', error);
-      }
-    });
 
     return () => {
       mqttClient.disconnect();
-      if (countdownInterval) {
-        clearInterval(countdownInterval);
-      }
     };
-  }, [activityId, countdownInterval, fetchSlideData]);
+  }, [slideId, getMqttTopic]);
 
-  // Fetch historical submissions
-  useEffect(() => {
-    if (!activityId) return;
+  const publishMessage = useCallback((data: { type: string; title?: string; image?: string; countdownTime?: number }) => {
+    const topic = getMqttTopic();
+    if (!topic) return;
+    mqttClient.publish(topic, JSON.stringify(data));
+  }, [getMqttTopic]);
 
-    const fetchHistoricalSubmissions = async () => {
-      try {
-        const drawings = await getDrawingsBySlideId(activityId);
-        setHistoricalSubmissions(drawings);
-      } catch (error) {
-        console.error('Error fetching historical submissions:', error);
-        message.error('Failed to fetch historical submissions');
-      }
-    };
-
-    fetchHistoricalSubmissions();
-  }, [activityId]);
-
-  const publishMessage = useCallback((data: MQTTMessage) => {
-    if (!activityId) return;
-    mqttClient.publish(`presenter/slide/${activityId}`, JSON.stringify(data));
-  }, [activityId]);
-
-  const debouncedTitleUpdate = useCallback(
-    debounce((value: string) => {
-      publishMessage({
-        type: 'title_update',
-        title: value
+  const updateSlide = useCallback(async (values: FormValues) => {
+    if (!slideId) return;
+    try {
+      console.log('Updating slide settings:', values);
+      await updateSlideSettings({
+        slideId,
+        title: values.title,
+        countdownTime: values.countdownDuration,
       });
+    } catch (error) {
+      console.error('Error updating slide:', error);
+      message.error('Failed to update slide settings');
+    }
+  }, [slideId]);
+
+  const debouncedUpdateSlide = useCallback(
+    debounce((values: FormValues) => {
+      updateSlide(values);
     }, 500),
-    [publishMessage]
+    [updateSlide]
   );
 
-  const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    debouncedTitleUpdate(e.target.value);
-  };
-
-  const handleImageUpload = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const imageData = e.target?.result as string;
-      publishMessage({
-        type: 'reference_image',
-        image: imageData
-      });
-      message.success('Image uploaded successfully');
-    };
-    reader.readAsDataURL(file);
-    return false;
-  };
-
-  const startSession = () => {
-    if (countdownInterval) {
-      clearInterval(countdownInterval);
+  const handleValuesChange = useCallback((changedValues: Partial<FormValues>, allValues: FormValues) => {
+    // Nếu là referenceImage thì KHÔNG update slide ở đây
+    if (changedValues.referenceImage !== undefined) {
+    
     }
 
-    setIsSessionActive(true);
-    setSubmissions([]); // Clear previous submissions
-    let remainingTime = countdownDuration;
-
-    publishMessage({
-      type: 'countdown_start',
-      duration: countdownDuration
-    });
-
-    const interval = setInterval(() => {
-      remainingTime -= 1;
+    if (changedValues.title !== undefined) {
+      publishMessage({
+        type: 'title_update',
+        title: allValues.title
+      });
+    }
+    if (changedValues.countdownDuration !== undefined) {
       publishMessage({
         type: 'countdown_update',
-        remainingTime
+        countdownTime: allValues.countdownDuration
       });
-
-      if (remainingTime <= 0) {
-        clearInterval(interval);
-        setIsSessionActive(false);
-        publishMessage({
-          type: 'countdown_end'
-        });
-      }
-    }, 1000);
-
-    setCountdownInterval(interval);
-  };
-
-  const endSession = () => {
-    if (countdownInterval) {
-      clearInterval(countdownInterval);
     }
-    setIsSessionActive(false);
-    publishMessage({
-      type: 'countdown_end'
-    });
+    debouncedUpdateSlide(allValues);
+  }, [publishMessage, debouncedUpdateSlide]);
+
+  const handleImageUpload = async (file: File) => {
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64Image = e.target?.result as string;
+        form.setFieldValue('referenceImage', base64Image);
+        message.success('Image uploaded successfully');
+        
+        // Update slide settings with the base64 image
+        if (slideId) {
+          updateSlideSettings({
+            slideId,
+            title: form.getFieldValue('title'),
+            countdownTime: form.getFieldValue('countdownDuration'),
+            referenceImage: base64Image
+          }).catch(console.error);
+          
+          // Publish MQTT message
+          publishMessage({
+            type: 'reference_image',
+            reference_image: base64Image
+          });
+        }
+      };
+      reader.readAsDataURL(file);
+      return false; // Prevent default upload behavior
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      message.error('Failed to upload image');
+      return false;
+    }
   };
 
-  const handleDeleteSubmission = (submissionId: string) => {
-    setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
-    message.success('Submission deleted');
-  };
-
-  const formatTimestamp = (timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  };
-
-  if (!activityId) {
+  if (!slideId) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-purple-900 to-indigo-900 flex items-center justify-center">
-        <div className="text-white text-xl">Missing activity ID</div>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-white text-xl">Missing slide ID</div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Spin size="large" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-purple-900 to-indigo-900 p-4 md:p-8">
-      <div className="max-w-7xl mx-auto">
-        <Row gutter={[16, 16]}>
-          {/* Left Column - Controls */}
-          <Col xs={24} lg={8}>
-            <Card className="h-full shadow-lg rounded-xl">
-              <Title level={3} className="mb-6 flex items-center">
-                <EditOutlined className="mr-2" />
-                Session Controls
-              </Title>
-              
-              <div className="space-y-6">
-                {/* Title Control */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Session Title
-                  </label>
-                  <Input
-                    id="title-input"
-                    onChange={handleTitleChange}
-                    placeholder="Enter session title"
-                    className="w-full"
-                    size="large"
-                  />
-                </div>
-
-                {/* Image Upload */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Reference Image
-                  </label>
-                  <Upload
-                    beforeUpload={handleImageUpload}
-                    showUploadList={false}
-                    accept="image/*"
+    <Layout className="min-h-screen">
+      <Content className="p-4 md:p-8">
+        <div className="max-w-7xl mx-auto">
+          <Row gutter={[16, 16]}>
+            <Col xs={24} lg={8}>
+              <Card className="shadow-lg rounded-xl">
+                <Title level={3} className="mb-6">Controls</Title>
+                <Form
+                  form={form}
+                  layout="vertical"
+                  onValuesChange={handleValuesChange}
+                >
+                  <Form.Item
+                    label={<Title level={5}>Title / Question</Title>}
+                    name="title"
                   >
-                    <Button icon={<UploadOutlined />} size="large" block>
-                      Upload Image
-                    </Button>
-                  </Upload>
-                </div>
+                    <Input
+                      placeholder="Enter your question or title..."
+                      maxLength={100}
+                    />
+                  </Form.Item>
 
-                {/* Countdown Duration */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Countdown Duration (seconds)
-                  </label>
-                  <Input
-                    type="number"
-                    value={countdownDuration}
-                    onChange={(e) => setCountdownDuration(Number(e.target.value))}
-                    min={1}
-                    max={300}
-                    className="w-full"
-                    size="large"
-                  />
-                </div>
-
-                <Divider />
-
-                {/* Session Controls */}
-                <div className="flex flex-col gap-4">
-                  {!isSessionActive ? (
-                    <Button
-                      type="primary"
-                      onClick={startSession}
-                      size="large"
-                      icon={<PlayCircleOutlined />}
-                      className="h-12 text-lg"
+                  <Form.Item
+                    name="referenceImage"
+                  >
+                    <Upload
+                      beforeUpload={handleImageUpload}
+                      showUploadList={false}
                     >
-                      Start Session
-                    </Button>
-                  ) : (
-                    <Button
-                      danger
-                      onClick={endSession}
-                      size="large"
-                      icon={<StopOutlined />}
-                      className="h-12 text-lg"
-                    >
-                      End Session
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </Card>
-          </Col>
+                      <Button icon={<UploadOutlined />}>Upload Image</Button>
+                    </Upload>
+                  </Form.Item>
 
-          {/* Right Column - Submissions */}
-          <Col xs={24} lg={16}>
-            <Card className="shadow-lg rounded-xl">
-              <Title level={3} className="mb-6">Submissions</Title>
-              
-              {/* Active Session Submissions */}
-              {isSessionActive && submissions.length > 0 && (
-                <>
-                  <Title level={4} className="mb-4">Current Session</Title>
-                  <List
-                    grid={{ gutter: 16, xs: 1, sm: 2, md: 3, lg: 3, xl: 4, xxl: 4 }}
-                    dataSource={submissions}
-                    renderItem={(submission) => (
-                      <List.Item>
-                        <Card
-                          hoverable
-                          cover={<Image src={submission.image} alt="Submission" />}
-                          actions={[
-                            <Tooltip title="Delete">
-                              <DeleteOutlined onClick={() => handleDeleteSubmission(submission.id)} />
-                            </Tooltip>
-                          ]}
-                        >
-                          <Card.Meta
-                            title={submission.audienceName}
-                            description={
-                              <Space direction="vertical" size="small">
-                                <Text type="secondary">
-                                  <UserOutlined /> {submission.audienceId}
-                                </Text>
-                                <Text type="secondary">
-                                  <ClockCircleOutlined /> {formatTimestamp(submission.timestamp)}
-                                </Text>
-                              </Space>
-                            }
-                          />
-                        </Card>
-                      </List.Item>
-                    )}
-                  />
-                  <Divider />
-                </>
-              )}
-
-              {/* Historical Submissions */}
-              {historicalSubmissions.length > 0 && (
-                <>
-                  <Title level={4} className="mb-4">Historical Submissions</Title>
-                  <List
-                    grid={{ gutter: 16, xs: 1, sm: 2, md: 3, lg: 3, xl: 4, xxl: 4 }}
-                    dataSource={historicalSubmissions}
-                    renderItem={(submission) => (
-                      <List.Item>
-                        <Card
-                          hoverable
-                          cover={<Image src={submission.image_data} alt="Submission" />}
-                        >
-                          <Card.Meta
-                            title={submission.audience_name}
-                            description={
-                              <Space direction="vertical" size="small">
-                                <Text type="secondary">
-                                  <UserOutlined /> {submission.audience_id}
-                                </Text>
-                                <Text type="secondary">
-                                  <ClockCircleOutlined /> {new Date(submission.created_at).toLocaleString()}
-                                </Text>
-                              </Space>
-                            }
-                          />
-                        </Card>
-                      </List.Item>
-                    )}
-                  />
-                </>
-              )}
-
-              {/* No Submissions Message */}
-              {!isSessionActive && submissions.length === 0 && historicalSubmissions.length === 0 && (
-                <div className="text-center py-8">
-                  <Text type="secondary">No submissions yet. Start a session to collect submissions.</Text>
-                </div>
-              )}
-            </Card>
-          </Col>
-        </Row>
-      </div>
-    </div>
+                  <Form.Item
+                    label={<Title level={5}>Countdown Duration</Title>}
+                    name="countdownDuration"
+                  >
+                    <Select
+                      style={{ width: '120px' }}
+                      options={[
+                        { value: 10, label: '10s' },
+                        { value: 20, label: '20s' },
+                        { value: 30, label: '30s' },
+                        { value: 40, label: '40s' },
+                        { value: 50, label: '50s' },
+                        { value: 60, label: '60s' },
+                      ]}
+                    />
+                  </Form.Item>
+                </Form>
+              </Card>
+            </Col>
+          </Row>
+        </div>
+      </Content>
+    </Layout>
   );
 } 

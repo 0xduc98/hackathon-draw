@@ -14,7 +14,7 @@ export const useMqtt = ({ topic, onMessage }: UseMqttProps) => {
     return () => {
       mqttClient.disconnect();
     };
-  }, [topic, onMessage]);
+  }, [topic]);
 
   const publish = (message: string) => {
     mqttClient.publish(topic, message);

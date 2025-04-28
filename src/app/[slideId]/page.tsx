@@ -15,7 +15,7 @@ export default function SlidePage() {
   });
 
   if (!slideId) return (
-    <div className="min-h-screen flex items-center justify-center bg-[#4b2054]">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="bg-white rounded-xl shadow-lg p-8 text-center">
         <h1 className="text-2xl font-bold text-red-600 mb-2">Error</h1>
         <p className="text-lg text-gray-700">Missing slide ID in the URL.</p>
@@ -24,13 +24,13 @@ export default function SlidePage() {
   );
 
   if (isLoading) return (
-    <div className="min-h-screen flex items-center justify-center bg-[#4b2054]">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="text-white text-xl">Loading slide data...</div>
     </div>
   );
 
   if (error) return (
-    <div className="min-h-screen flex items-center justify-center bg-[#4b2054]">
+    <div className="min-h-screen flex items-center justify-center">
       <div className="bg-white rounded-xl shadow-lg p-8 text-center">
         <h1 className="text-2xl font-bold text-red-600 mb-2">Error</h1>
         <p className="text-lg text-gray-700">
@@ -41,7 +41,7 @@ export default function SlidePage() {
   );
 
   return (
-    <div className="min-h-screen bg-[#4b2054] p-8">
+    <div className="min-h-screen p-8">
       <div className="bg-white rounded-xl shadow-lg p-8">
         <h1 className="text-2xl font-bold mb-4">Drawings for slide: {slideId}</h1>
         <pre className="bg-gray-100 p-4 rounded-lg overflow-auto">

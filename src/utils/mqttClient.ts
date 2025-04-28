@@ -10,6 +10,7 @@ export function subscribeMQTT(topic: string, callback: (msg: any) => void) {
       callback(JSON.parse(message));
     } catch (e) {
       // handle error
+      console.error('Error parsing MQTT message:', e);
     }
   });
 }

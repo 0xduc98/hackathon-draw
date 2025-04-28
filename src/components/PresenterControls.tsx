@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { Button, Upload, Input, Space, Typography, message } from 'antd';
-import { UploadOutlined, StopOutlined } from '@ant-design/icons';
+import { UploadOutlined } from '@ant-design/icons';
 import { mqttClient } from '@/utils/mqtt';
 import debounce from 'lodash/debounce';
+import { SessionFollow } from './SessionFollow';
 
 const { Title } = Typography;
 
@@ -15,10 +16,6 @@ interface PresenterControlsProps {
 }
 
 export function PresenterControls({ slideId, onCountdownStart, onCountdownEnd, onTitleChange, title }: PresenterControlsProps) {
-  const [countdownDuration, setCountdownDuration] = useState<number>(60);
-  const [isCountingDown, setIsCountingDown] = useState(false);
-  const [currentCountdown, setCurrentCountdown] = useState<number | null>(null);
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const titleInputRef = useRef<any>(null);
 
   // Debounced function to broadcast and update title
@@ -44,9 +41,6 @@ export function PresenterControls({ slideId, onCountdownStart, onCountdownEnd, o
 
   useEffect(() => {
     return () => {
-      if (countdownIntervalRef.current) {
-        clearInterval(countdownIntervalRef.current);
-      }
       debouncedTitleUpdate.cancel();
     };
   }, []);
@@ -60,7 +54,7 @@ export function PresenterControls({ slideId, onCountdownStart, onCountdownEnd, o
           `presenter/slide/${slideId}`,
           JSON.stringify({
             type: 'reference_image',
-            image: base64Image,
+            reference_image: base64Image,
           })
         );
         message.success('Image uploaded successfully');
@@ -73,69 +67,6 @@ export function PresenterControls({ slideId, onCountdownStart, onCountdownEnd, o
 
   const handleTitleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     debouncedTitleUpdate(e.target.value);
-  };
-
-  const startCountdown = () => {
-    setIsCountingDown(true);
-    setCurrentCountdown(countdownDuration);
-    onCountdownStart(countdownDuration);
-    
-    mqttClient.publish(
-      `presenter/slide/${slideId}`,
-      JSON.stringify({
-        type: 'countdown_start',
-        duration: countdownDuration,
-      })
-    );
-
-    // Set up interval for countdown updates
-    countdownIntervalRef.current = setInterval(() => {
-      setCurrentCountdown(prev => {
-        if (prev === null || prev <= 1) {
-          if (countdownIntervalRef.current) {
-            clearInterval(countdownIntervalRef.current);
-          }
-          setIsCountingDown(false);
-          onCountdownEnd();
-          mqttClient.publish(
-            `presenter/slide/${slideId}`,
-            JSON.stringify({
-              type: 'countdown_end',
-            })
-          );
-          return null;
-        }
-        
-        // Publish countdown update
-        mqttClient.publish(
-          `presenter/slide/${slideId}`,
-          JSON.stringify({
-            type: 'countdown_update',
-            remainingTime: prev - 1,
-          })
-        );
-        
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const quickEndSession = () => {
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-    }
-    setIsCountingDown(false);
-    setCurrentCountdown(null);
-    onCountdownEnd();
-    
-    mqttClient.publish(
-      `presenter/slide/${slideId}`,
-      JSON.stringify({
-        type: 'countdown_end',
-      })
-    );
-    
-    message.success('Session ended early');
   };
 
   return (
@@ -166,44 +97,11 @@ export function PresenterControls({ slideId, onCountdownStart, onCountdownEnd, o
           </Upload>
         </div>
 
-        <div>
-          <Title level={5}>Drawing Timer</Title>
-          <Space direction="vertical" className="w-full">
-            <Space>
-              <Input
-                type="number"
-                value={countdownDuration}
-                onChange={(e) => setCountdownDuration(Number(e.target.value))}
-                min={10}
-                max={300}
-                addonAfter="seconds"
-              />
-              <Button
-                type="primary"
-                onClick={startCountdown}
-                disabled={isCountingDown}
-              >
-                {isCountingDown ? 'Timer Running...' : 'Start Timer'}
-              </Button>
-            </Space>
-            {isCountingDown && currentCountdown !== null && (
-              <div className="text-center text-2xl font-bold">
-                Time remaining: {currentCountdown} seconds
-              </div>
-            )}
-            {isCountingDown && (
-              <Button 
-                type="primary" 
-                danger 
-                icon={<StopOutlined />} 
-                onClick={quickEndSession}
-                className="w-full"
-              >
-                Quick End Session
-              </Button>
-            )}
-          </Space>
-        </div>
+        <SessionFollow 
+          slideId={slideId}
+          onSessionStart={onCountdownStart}
+          onSessionEnd={onCountdownEnd}
+        />
       </Space>
     </div>
   );

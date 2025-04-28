@@ -3,13 +3,13 @@
 import { useState, useEffect } from 'react';
 import { mqttClient } from '@/utils/mqtt';
 import { useSearchParams } from 'next/navigation';
-import { Layout, Card, Button, Typography, message } from 'antd';
-import { ClearOutlined } from '@ant-design/icons';
-import { AudienceImageGallery } from './AudienceImageGallery';
+import { Layout, Card, Button, Typography, message, Upload } from 'antd';
+import { ClearOutlined, UploadOutlined } from '@ant-design/icons';
+import { AudienceImageGallery } from '../../components/AudienceImageGallery';
 import { SlideControls } from '@/components/SlideControls';
 import { CountdownDisplay } from '@/components/CountdownDisplay';
 import { useSlideStore } from '@/store/slideStore';
-import { getDrawingsBySlideId, getSlideById } from '@/api';
+import { getDrawingsBySlideId, createOrUpdateSlide } from '@/api';
 
 const { Header, Content } = Layout;
 const { Title } = Typography;
@@ -41,8 +41,11 @@ export default function PresenterPage() {
     const initializeSlide = async () => {
       setIsLoading(true);
       try {
-        // Fetch slide data using the store function
-        await fetchSlideData(slideId);
+        // Update or create slide using the API
+        await createOrUpdateSlide({ 
+          slideId: slideId, 
+          title: '' // Default title for new slides
+        });
         
         // Fetch audience drawings
         const drawings = await getDrawingsBySlideId(slideId);
@@ -62,7 +65,7 @@ export default function PresenterPage() {
     };
     
     initializeSlide();
-  }, [slideId, fetchSlideData, updateSlideData]);
+  }, [slideId, updateSlideData]);
 
   // Handle MQTT messages for audience images
   useEffect(() => {
@@ -99,68 +102,82 @@ export default function PresenterPage() {
     message.success('All images cleared');
   };
 
+  const handleImageUpload = async (file: File) => {
+    try {
+      // Convert file to base64
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const base64Image = e.target?.result as string;
+        setReferenceImage(base64Image);
+        message.success('Reference image uploaded successfully');
+      };
+      reader.readAsDataURL(file);
+      return false; // Prevent default upload behavior
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      message.error('Failed to upload image');
+      return false;
+    }
+  };
+
   if (isLoading) {
     return (
-      <Layout className="min-h-screen bg-[#4b2054] flex items-center justify-center">
+      <Layout className="min-h-screen flex items-center justify-center">
         <div className="text-white text-xl">Loading slide data...</div>
       </Layout>
     );
   }
 
   return (
-    <Layout className="min-h-screen bg-[#4b2054]">
+    <Layout className="min-h-screen">
       <Header className="bg-transparent border-none flex items-center justify-between px-4 md:px-8">
         <Title level={3} className="text-white m-0">
           Edit Slide: {slideId}
         </Title>
-        <Button 
-          icon={<ClearOutlined />} 
-          onClick={clearAllImages}
-          danger
-        >
-          Clear All Images
-        </Button>
+        <div className="flex gap-2">
+          <Upload
+            accept="image/*"
+            showUploadList={false}
+            beforeUpload={handleImageUpload}
+          >
+            <Button icon={<UploadOutlined />} type="primary">
+              Upload Reference Image
+            </Button>
+          </Upload>
+          <Button 
+            icon={<ClearOutlined />} 
+            onClick={clearAllImages}
+            danger
+          >
+            Clear All Images
+          </Button>
+        </div>
       </Header>
       <Content className="p-4 md:p-8">
         <div className="max-w-7xl mx-auto">
           <div className="flex-1 flex flex-col items-center justify-start">
-            <Card
-              className="mb-4 flex flex-col items-center"
-              style={{
-                borderRadius: 20,
-                maxWidth: 400,
-                width: '100%',
-                margin: '0 auto',
-                boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
-                background: '#4b2054',
-                border: '1px solid #fff2',
-              }}
-              bodyStyle={{ padding: 12, display: 'flex', justifyContent: 'center', background: '#fff' }}
-            >
-              {referenceImage && (
+            {referenceImage && (
+              <Card
+                className="mb-4"
+                title="Reference Image"
+                style={{ width: '100%', maxWidth: 600 }}
+              >
                 <img
                   src={referenceImage}
                   alt="Reference"
                   style={{
                     width: '100%',
-                    maxWidth: 360,
-                    borderRadius: 12,
-                    objectFit: 'contain',
-                    margin: '0 auto',
-                    display: 'block',
+                    maxHeight: 400,
+                    objectFit: 'contain'
                   }}
                 />
-              )}
-            </Card>
+              </Card>
+            )}
             <CountdownDisplay />
             <SlideControls slideId={slideId} />
           </div>
         </div>
-        {showAudienceDrawings && audienceImages.length > 0 && (
-          <Card title="Audience Drawings" className="mt-4">
-            <AudienceImageGallery images={audienceImages} />
-          </Card>
-        )}
+      
       </Content>
     </Layout>
   );

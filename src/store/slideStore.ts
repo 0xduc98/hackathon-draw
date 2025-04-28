@@ -20,62 +20,71 @@ export const useSlideStore = create<SlideState>((set) => ({
   
   setTitle: (title: string) => {
     set({ title });
-    const slideId = window.location.pathname.split('/').pop() || '1';
-    // Update slide settings only when user changes title
-    updateSlideSettings({
-      slideId,
-      title,
-      countdownTime: 60,
-      referenceImage: undefined
-    }).catch(console.error);
-    // Publish MQTT update
-    mqttClient.publish(
-      `presenter/slide/${slideId}`,
-      JSON.stringify({
-        type: 'title_update',
+    const slideId = typeof window !== 'undefined' ? window.location.pathname.split('/').pop() || '1' : '1';
+    const isPresenter = typeof window !== 'undefined' && (window.location.pathname.includes('/present') || window.location.pathname.includes('/edit'));
+    if (isPresenter) {
+      updateSlideSettings({
+        slideId,
         title,
-      })
-    );
+        countdownTime: undefined,
+        referenceImage: undefined
+      }).catch(console.error);
+      mqttClient.publish(
+        `presenter/slide/${slideId}`,
+        JSON.stringify({
+          type: 'title_update',
+          title,
+          countdown_time: undefined,
+          reference_image: undefined
+        })
+      );
+    }
   },
   
   setCountdownTime: (time: number | null) => {
     set({ countdownTime: time });
-    const slideId = window.location.pathname.split('/').pop() || '1';
-    // Update slide settings only when user changes countdown
-    updateSlideSettings({
-      slideId,
-      title: '',
-      countdownTime: time || 60,
-      referenceImage: undefined
-    }).catch(console.error);
-    // Publish MQTT update
-    mqttClient.publish(
-      `presenter/slide/${slideId}`,
-      JSON.stringify({
-        type: time ? 'countdown_update' : 'countdown_end',
-        remainingTime: time,
-      })
-    );
+    const slideId = typeof window !== 'undefined' ? window.location.pathname.split('/').pop() || '1' : '1';
+    const isPresenter = typeof window !== 'undefined' && (window.location.pathname.includes('/present') || window.location.pathname.includes('/edit'));
+    if (isPresenter) {
+      updateSlideSettings({
+        slideId,
+        title: undefined,
+        countdownTime: time || undefined,
+        referenceImage: undefined
+      }).catch(console.error);
+      mqttClient.publish(
+        `presenter/slide/${slideId}`,
+        JSON.stringify({
+          type: time ? 'countdown_update' : 'countdown_end',
+          title: undefined,
+          countdown_time: time || undefined,
+          reference_image: undefined
+        })
+      );
+    }
   },
   
   setReferenceImage: (image: string | null) => {
     set({ referenceImage: image });
-    const slideId = window.location.pathname.split('/').pop() || '1';
-    // Update slide settings only when user uploads image
-    updateSlideSettings({
-      slideId,
-      title: '',
-      countdownTime: 60,
-      referenceImage: image || undefined
-    }).catch(console.error);
-    // Publish MQTT update
-    mqttClient.publish(
-      `presenter/slide/${slideId}`,
-      JSON.stringify({
-        type: 'reference_image',
-        image,
-      })
-    );
+    const slideId = typeof window !== 'undefined' ? window.location.pathname.split('/').pop() || '1' : '1';
+    const isPresenter = typeof window !== 'undefined' && (window.location.pathname.includes('/present') || window.location.pathname.includes('/edit'));
+    if (isPresenter) {
+      updateSlideSettings({
+        slideId,
+        title: undefined,
+        countdownTime: undefined,
+        referenceImage: image || undefined
+      }).catch(console.error);
+      mqttClient.publish(
+        `presenter/slide/${slideId}`,
+        JSON.stringify({
+          type: 'reference_image',
+          title: undefined,
+          countdown_time: undefined,
+          reference_image: image || undefined
+        })
+      );
+    }
   },
   
   updateSlideData: (slideId: string) => {
@@ -86,9 +95,9 @@ export const useSlideStore = create<SlideState>((set) => ({
         if (data.type === 'title_update' && typeof data.title === 'string') {
           set({ title: data.title });
         } else if (data.type === 'countdown_update' || data.type === 'countdown_end') {
-          set({ countdownTime: data.remainingTime });
+          set({ countdownTime: data.countdown_time });
         } else if (data.type === 'reference_image') {
-          set({ referenceImage: data.image });
+          set({ referenceImage: data.reference_image });
         }
       } catch (error) {
         console.error('Error parsing MQTT message:', error);
@@ -115,6 +124,8 @@ export const useSlideStore = create<SlideState>((set) => ({
           JSON.stringify({
             type: 'title_update',
             title: slideData.title || '',
+            countdown_time: slideData.countdown_time || 60,
+            reference_image: slideData.reference_image || undefined
           })
         );
 
@@ -123,7 +134,9 @@ export const useSlideStore = create<SlideState>((set) => ({
             `presenter/slide/${slideId}`,
             JSON.stringify({
               type: 'reference_image',
-              image: slideData.reference_image,
+              title: slideData.title || '',
+              countdown_time: slideData.countdown_time || 60,
+              reference_image: slideData.reference_image
             })
           );
         }
@@ -133,7 +146,9 @@ export const useSlideStore = create<SlideState>((set) => ({
             `presenter/slide/${slideId}`,
             JSON.stringify({
               type: 'countdown_update',
-              remainingTime: slideData.countdown_time,
+              title: slideData.title || '',
+              countdown_time: slideData.countdown_time,
+              reference_image: slideData.reference_image || undefined
             })
           );
         }
