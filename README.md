@@ -1,36 +1,150 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Hackathon Draw - Interactive Drawing Application
+
+A real-time collaborative drawing application built for hackathons and presentations, allowing presenters to create slides with reference images and audience members to submit drawings.
+
+## Solution Design
+
+### Architecture Overview
+
+The application follows a modern web architecture with:
+
+1. **Frontend**: Next.js React application with TypeScript
+   - Client-side drawing capabilities using Fabric.js
+   - Real-time updates using React Query
+   - State management with Zustand
+
+2. **Backend**: Express.js server with SQLite database
+   - RESTful API endpoints for slides and drawings
+   - SQLite for persistent storage
+   - CORS enabled for cross-origin requests
+
+3. **Database Schema**:
+   - `slides`: Stores slide information (id, title, etc.)
+   - `drawings`: Stores audience drawing submissions
+   - `reference_images`: Stores reference images for slides
+
+### Key Features
+
+- **Presenter Mode**: Create and manage slides with reference images
+- **Audience Mode**: View slides and submit drawings
+- **Real-time Drawing**: Interactive canvas with various drawing tools
+- **Countdown Timer**: Time-limited drawing sessions
+- **Drawing History**: View and navigate through drawing history
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Node.js (v18 or higher)
+- npm or pnpm
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Installation
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd hackathon-draw
+   ```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2. Install frontend dependencies:
+   ```bash
+   npm install
+   # or
+   pnpm install
+   ```
 
-## Learn More
+3. Install server dependencies:
+   ```bash
+   cd server
+   npm install
+   ```
 
-To learn more about Next.js, take a look at the following resources:
+### Running the Application
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Start the backend server:
+   ```bash
+   cd server
+   npm run dev
+   ```
+   The server will run on http://localhost:3001
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+2. Start the frontend development server:
+   ```bash
+   # From the root directory
+   npm run dev
+   # or
+   pnpm dev
+   ```
+   The frontend will run on http://localhost:3000
 
-## Deploy on Vercel
+## API Documentation
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Slides API
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `GET /api/slides/:slideId` - Get a slide with its reference image
+- `POST /api/slides` - Create or update a slide
+- `POST /api/slides/:slideId/image` - Save a reference image for a slide
+
+### Drawings API
+
+- `GET /api/drawings/:slideId` - Get all drawings for a slide
+- `POST /api/drawings` - Save a drawing submission
+
+## Project Structure
+
+### Frontend
+
+- `/src/app` - Next.js app router pages
+- `/src/components` - React components
+- `/src/store` - Zustand state management
+- `/src/api` - API client functions
+- `/src/hooks` - Custom React hooks
+- `/src/utils` - Utility functions
+
+### Backend
+
+- `/server/src/index.js` - Express server and API routes
+- `/server/src/db.js` - Database connection and schema
+
+## Usage Guide
+
+### For Presenters
+
+1. Navigate to the home page
+2. Create a new slide or select an existing one
+3. Upload a reference image (optional)
+4. Start a presentation session
+5. Control the countdown timer
+6. View and manage audience submissions
+
+### For Audience Members
+
+1. Join a presentation using the slide ID
+2. View the reference image (if provided)
+3. Draw on the canvas during the countdown
+4. Submit your drawing
+5. View other participants' submissions
+
+## Technologies Used
+
+- **Frontend**:
+  - Next.js 14
+  - React 18
+  - TypeScript
+  - Fabric.js
+  - Ant Design
+  - Zustand
+  - React Query
+
+- **Backend**:
+  - Express.js
+  - SQLite3
+  - Node.js
+
+## License
+
+[MIT License](LICENSE)
+
+## Contributors
+
+- [Your Name/Team]

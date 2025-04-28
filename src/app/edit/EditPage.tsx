@@ -3,10 +3,13 @@
 import { useState, useEffect } from 'react';
 import { mqttClient } from '@/utils/mqtt';
 import { useSearchParams } from 'next/navigation';
-import { Layout, Card, Button, Typography, Row, Col, message } from 'antd';
+import { Layout, Card, Button, Typography, message } from 'antd';
 import { ClearOutlined } from '@ant-design/icons';
 import { AudienceImageGallery } from './AudienceImageGallery';
-import { PresenterControls } from '@/components/PresenterControls';
+import { SlideControls } from '@/components/SlideControls';
+import { CountdownDisplay } from '@/components/CountdownDisplay';
+import { useSlideStore } from '@/store/slideStore';
+import { getDrawingsBySlideId, getSlideById } from '@/api';
 
 const { Header, Content } = Layout;
 const { Title } = Typography;
@@ -22,13 +25,46 @@ export default function PresenterPage() {
   const slideIdParam = searchParams.get('slideId');
   const [slideId] = useState<string>(slideIdParam || '1');
   const [audienceImages, setAudienceImages] = useState<AudienceImage[]>([]);
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
-  const [isDrawingTime, setIsDrawingTime] = useState(false);
-  const [countdownTime, setCountdownTime] = useState<number | null>(null);
   const [showAudienceDrawings, setShowAudienceDrawings] = useState(false);
-  const [title, setTitle] = useState('đây là gì');
+  const [isLoading, setIsLoading] = useState(true);
+  const { 
+    referenceImage,
+    setTitle, 
+    setReferenceImage,
+    setCountdownTime,
+    updateSlideData,
+    fetchSlideData
+  } = useSlideStore();
 
-  // Handle MQTT messages for reference image, countdown, audience images, and title
+  // Initialize the slide data and fetch from API
+  useEffect(() => {
+    const initializeSlide = async () => {
+      setIsLoading(true);
+      try {
+        // Fetch slide data using the store function
+        await fetchSlideData(slideId);
+        
+        // Fetch audience drawings
+        const drawings = await getDrawingsBySlideId(slideId);
+        if (drawings && drawings.length > 0) {
+          setAudienceImages(drawings);
+          setShowAudienceDrawings(true);
+        }
+        
+        // Subscribe to MQTT updates
+        updateSlideData(slideId);
+      } catch (error) {
+        console.error('Error initializing slide:', error);
+        message.error('Failed to load slide data');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    initializeSlide();
+  }, [slideId, fetchSlideData, updateSlideData]);
+
+  // Handle MQTT messages for audience images
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -37,19 +73,7 @@ export default function PresenterPage() {
     mqttClient.subscribe(topic, (message) => {
       try {
         const data = JSON.parse(message);
-        if (data.type === 'reference_image') {
-          setReferenceImage(data.image);
-        } else if (data.type === 'countdown_start') {
-          setIsDrawingTime(true);
-          setCountdownTime(data.duration);
-          setShowAudienceDrawings(false);
-        } else if (data.type === 'countdown_update') {
-          setCountdownTime(data.remainingTime);
-        } else if (data.type === 'countdown_end') {
-          setIsDrawingTime(false);
-          setCountdownTime(null);
-          setShowAudienceDrawings(true);
-        } else if (data.type === 'image' && data.image && data.audienceId) {
+        if (data.type === 'image' && data.image && data.audienceId) {
           setAudienceImages(prev => {
             const filtered = prev.filter(img => img.audienceId !== data.audienceId);
             return [...filtered, {
@@ -58,8 +82,6 @@ export default function PresenterPage() {
               image: data.image
             }];
           });
-        } else if (data.type === 'title_update' && typeof data.title === 'string') {
-          setTitle(data.title);
         }
       } catch (error) {
         console.error('Error parsing MQTT message:', error);
@@ -71,41 +93,36 @@ export default function PresenterPage() {
     };
   }, [slideId]);
 
-  const handleCountdownStart = (duration: number) => {
-    setCountdownTime(duration);
-    setIsDrawingTime(true);
-    setShowAudienceDrawings(false);
-  };
-
-  const handleCountdownEnd = () => {
-    setCountdownTime(null);
-    setIsDrawingTime(false);
-    setShowAudienceDrawings(true);
-  };
-
   const clearAllImages = () => {
     setAudienceImages([]);
     setShowAudienceDrawings(false);
     message.success('All images cleared');
   };
 
+  if (isLoading) {
+    return (
+      <Layout className="min-h-screen bg-[#4b2054] flex items-center justify-center">
+        <div className="text-white text-xl">Loading slide data...</div>
+      </Layout>
+    );
+  }
+
   return (
     <Layout className="min-h-screen bg-[#4b2054]">
-      <Header className="bg-[#4b2054] px-6 flex items-center justify-between border-b border-[#fff2]">
-        <Title level={3} style={{ color: 'white', margin: 0 }}>Presenter Screen</Title>
-        <Button onClick={clearAllImages} icon={<ClearOutlined />}>
+      <Header className="bg-transparent border-none flex items-center justify-between px-4 md:px-8">
+        <Title level={3} className="text-white m-0">
+          Edit Slide: {slideId}
+        </Title>
+        <Button 
+          icon={<ClearOutlined />} 
+          onClick={clearAllImages}
+          danger
+        >
           Clear All Images
         </Button>
       </Header>
       <Content className="p-4 md:p-8">
-        <div className="w-full flex flex-col md:flex-row gap-4 md:gap-8" style={{ minHeight: 500 }}>
-          {/* Left: Title/Question */}
-          <div className="flex-1 bg-[#4b2054] rounded-2xl flex flex-col items-center justify-center p-4 min-h-[350px] border border-[#fff2]">
-            <div className="w-full flex flex-col items-center justify-center h-full">
-              <span className="text-white text-2xl md:text-3xl font-semibold text-center" style={{ wordBreak: 'break-word' }}>{title || 'Your question here...'}</span>
-            </div>
-          </div>
-          {/* Right: Reference Image and controls */}
+        <div className="max-w-7xl mx-auto">
           <div className="flex-1 flex flex-col items-center justify-start">
             <Card
               className="mb-4 flex flex-col items-center"
@@ -135,18 +152,8 @@ export default function PresenterPage() {
                 />
               )}
             </Card>
-            {isDrawingTime && countdownTime !== null && (
-              <div className="text-center text-2xl font-bold mb-4 text-white">
-                Time remaining: {countdownTime} seconds
-              </div>
-            )}
-            <PresenterControls
-              slideId={slideId}
-              onCountdownStart={handleCountdownStart}
-              onCountdownEnd={handleCountdownEnd}
-              onTitleChange={setTitle}
-              title={title}
-            />
+            <CountdownDisplay />
+            <SlideControls slideId={slideId} />
           </div>
         </div>
         {showAudienceDrawings && audienceImages.length > 0 && (

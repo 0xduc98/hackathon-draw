@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { mqttClient } from '@/utils/mqtt';
 import { Layout, Card, Button, Typography } from 'antd';
-import { AudienceImageGallery } from '../../presenter/AudienceImageGallery';
+import { AudienceImageGallery } from '../../edit/AudienceImageGallery';
 
 const { Header, Content } = Layout;
 const { Title } = Typography;

@@ -100,7 +100,14 @@ app.get('/api/slides/:slideId', (req, res) => {
     if (!row) {
       return res.status(404).json({ error: 'Slide not found' });
     }
-    res.json(row);
+    
+    // Ensure countdown_time is included in the response
+    const response = {
+      ...row,
+      countdown_time: row.countdown_time || null
+    };
+    
+    res.json(response);
   });
 });
 
@@ -142,6 +149,71 @@ app.get('/api/drawings/:slideId', (req, res) => {
       return res.status(500).json({ error: 'Failed to fetch drawings' });
     }
     res.json(rows);
+  });
+});
+
+// Update screen settings
+app.post('/api/slides/:slideId/settings', (req, res) => {
+  const { slideId } = req.params;
+  const { title, countdownTime, referenceImage } = req.body;
+
+  if (!slideId) {
+    return res.status(400).json({ error: 'Slide ID is required' });
+  }
+
+  // First ensure the slide exists
+  db.get('SELECT slide_id FROM slides WHERE slide_id = ?', [slideId], (err, slide) => {
+    if (err) {
+      console.error('Error checking slide:', err);
+      return res.status(500).json({ error: 'Failed to check slide' });
+    }
+
+    if (!slide) {
+      return res.status(404).json({ error: 'Slide not found' });
+    }
+
+    // Update slide settings
+    const updateSlideQuery = `
+      UPDATE slides 
+      SET title = ?, countdown_time = ?
+      WHERE slide_id = ?
+    `;
+
+    db.run(updateSlideQuery, [title, countdownTime, slideId], function(err) {
+      if (err) {
+        console.error('Error updating slide settings:', err);
+        return res.status(500).json({ error: 'Failed to update slide settings' });
+      }
+
+      // If reference image is provided, update it
+      if (referenceImage) {
+        const updateImageQuery = `
+          INSERT OR REPLACE INTO reference_images (slide_id, image_data)
+          VALUES (?, ?)
+        `;
+
+        db.run(updateImageQuery, [slideId, referenceImage], function(err) {
+          if (err) {
+            console.error('Error updating reference image:', err);
+            return res.status(500).json({ error: 'Failed to update reference image' });
+          }
+          res.json({ 
+            id: this.lastID, 
+            slideId, 
+            title, 
+            countdownTime,
+            referenceImage 
+          });
+        });
+      } else {
+        res.json({ 
+          id: this.lastID, 
+          slideId, 
+          title, 
+          countdownTime 
+        });
+      }
+    });
   });
 });
 

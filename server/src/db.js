@@ -18,17 +18,13 @@ const db = new sqlite3.Database(join(__dirname, '../database.sqlite'), (err) => 
 // Create necessary tables
 function createTables() {
   db.serialize(() => {
-    // Drop existing tables to recreate with correct schema
-    db.run('DROP TABLE IF EXISTS reference_images');
-    db.run('DROP TABLE IF EXISTS drawings');
-    db.run('DROP TABLE IF EXISTS slides');
-
     // Table for storing slides
     db.run(`
       CREATE TABLE IF NOT EXISTS slides (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         slide_id TEXT NOT NULL UNIQUE,
         title TEXT,
+        countdown_time INTEGER,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
