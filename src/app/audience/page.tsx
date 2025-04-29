@@ -4,11 +4,11 @@ import { useState, useEffect, Suspense, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { mqttClient } from '@/utils/mqtt';
 import Draw, { DrawHandles } from '@/components/Draw';
-import { useMutation } from '@tanstack/react-query';
-import { postDrawing, getSlideById, uploadImageToS3 } from '@/api';
-import { Button, message, Alert } from 'antd';
-import { useSlideStore } from '@/store/slideStore';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { postDrawing, getSlideById } from '@/api';
+import { Button, message } from 'antd';
 import { useMqtt } from '@/hooks/useMqtt';
+import { Slide } from '@/types/slide';
 
 function AudiencePageContent() {
   const searchParams = useSearchParams();
@@ -21,19 +21,41 @@ function AudiencePageContent() {
   const [submissionSuccess, setSubmissionSuccess] = useState(false);
   const drawRef = useRef<DrawHandles>(null);
   
-  // Use the slide store to manage slide data
-  const { 
-    title, 
-    referenceImage, 
-    countdownTime,
-    setTitle, 
-    setReferenceImage, 
-    setCountdownTime,
-    fetchSlideData
-  } = useSlideStore();
+  // State for slide data
+  const [title, setTitle] = useState<string>('');
+  const [referenceImage, setReferenceImage] = useState<string | null>(null);
+  const [countdownTime, setCountdownTime] = useState<number | null>(null);
+  const [isMqttListening, setIsMqttListening] = useState(false);
+  const [hasRequestedSessionState, setHasRequestedSessionState] = useState(false);
 
-  // Add debugging to check parameters
+  // Fetch slide data using React Query
+  const { data: slideData, isLoading: isSlideLoading, error: slideError } = useQuery<Slide, Error>({
+    queryKey: ['slide', slideId],
+    queryFn: () => getSlideById(slideId || ''),
+    enabled: !!slideId,
+  });
 
+  // Update UI with slide data when it's fetched
+  useEffect(() => {
+    if (slideData) {
+      setTitle(slideData.title || '');
+      setReferenceImage(slideData.reference_image || null);
+      // Set initial countdown time from slide data
+      if (slideData.countdown_time) {
+        setCountdownTime(slideData.countdown_time);
+      }
+      // After fetching slide data, start listening to MQTT
+      setIsMqttListening(true);
+    }
+  }, [slideData]);
+
+  // Handle slide fetch error
+  useEffect(() => {
+    if (slideError) {
+      console.error('Error fetching slide data:', slideError);
+      message.error('Failed to load slide data');
+    }
+  }, [slideError]);
 
   const submitMutation = useMutation({
     mutationFn: postDrawing,
@@ -47,30 +69,41 @@ function AudiencePageContent() {
     }
   });
 
-  // Fetch slide data when component mounts
+  // Request current session state when MQTT listening starts
   useEffect(() => {
-    if (!slideId) {
-      console.error('Missing required parameter: slideId');
-      message.error('Missing required parameter: slideId');
-      return;
+    if (isMqttListening && slideId && !hasRequestedSessionState) {
+      console.log('Requesting current session state');
+      mqttClient.publish(
+        `presenter/slide/${slideId}`,
+        JSON.stringify({
+          type: 'request_session_state',
+          audienceId,
+          audienceName
+        })
+      );
+      setHasRequestedSessionState(true);
+      
+      // Set a timeout to request again if no response is received
+      const timeoutId = setTimeout(() => {
+        if (!isSessionActive) {
+          console.log('No session state received, requesting again');
+          mqttClient.publish(
+            `presenter/slide/${slideId}`,
+            JSON.stringify({
+              type: 'request_session_state',
+              audienceId,
+              audienceName
+            })
+          );
+        }
+      }, 5000);
+      
+      return () => clearTimeout(timeoutId);
     }
+  }, [isMqttListening, slideId, hasRequestedSessionState, isSessionActive, audienceId, audienceName]);
 
-    // Fetch slide data from API
-    const fetchData = async () => {
-      try {
-        // Use the slide store to fetch and set slide data
-        await fetchSlideData(slideId);
-      } catch (error) {
-        console.error('Error fetching slide data:', error);
-        message.error('Failed to load slide data');
-      }
-    };
-
-    fetchData();
-  }, [slideId, fetchSlideData]);
-
-  // MQTT subscription using useMqtt hook
-  const topic = slideId ? `presenter/slide/${slideId}` : '';
+  // MQTT subscription using useMqtt hook - only start listening after slide data is fetched
+  const topic = isMqttListening && slideId ? `presenter/slide/${slideId}` : '';
   useMqtt({
     topic,
     onMessage: (message) => {
@@ -119,6 +152,10 @@ function AudiencePageContent() {
               console.log('Syncing session state - remaining time:', data.remainingTime);
               setCountdownTime(data.remainingTime);
               setIsSessionActive(true);
+            } else if (!data.isActive) {
+              console.log('Session is not active');
+              setIsSessionActive(false);
+              setCountdownTime(null);
             }
             break;
             
@@ -137,19 +174,6 @@ function AudiencePageContent() {
       }
     }
   });
-
-  // Request current session state when component mounts
-  useEffect(() => {
-    if (slideId) {
-      console.log('Requesting current session state');
-      mqttClient.publish(
-        `presenter/slide/${slideId}`,
-        JSON.stringify({
-          type: 'request_session_state'
-        })
-      );
-    }
-  }, [slideId]);
 
   useEffect(() => {
     setSubmissionSuccess(false);
@@ -204,6 +228,24 @@ function AudiencePageContent() {
       }
     });
   };
+
+  // Show loading state while fetching slide data
+  if (isSlideLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-lg">Loading slide data...</div>
+      </div>
+    );
+  }
+
+  // Show error state if slide data fetch failed
+  if (slideError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-lg text-red-500">Failed to load slide data. Please try again.</div>
+      </div>
+    );
+  }
 
   if (submissionSuccess) {
     return (

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Layout, Card, Button, Typography, message, Space, Row, Col } from 'antd';
+import { Layout, Button, message } from 'antd';
 import { useSlideStore } from '@/store/slideStore';
 import { mqttClient } from '@/utils/mqtt';
 import { getDrawingsBySlideId } from '@/api';
@@ -10,7 +10,6 @@ import { SubmissionsColumn } from '@/components/SubmissionsColumn';
 import { CountdownAnimation } from '@/components/CountdownAnimation';
 
 const { Content } = Layout;
-const { Title } = Typography;
 
 interface Submission {
   id: string;
@@ -28,18 +27,14 @@ interface HistoricalSubmission {
   created_at: string;
 }
 
-interface Drawing {
-  id: number;
-  audience_id: string;
-  audience_name: string;
-  image: string;
-  created_at: string;
-}
-
 export default function PresenterPage() {
   const searchParams = useSearchParams();
   const slideIdParam = searchParams.get('slideId');
+  const presentationIdParam = searchParams.get('presentationId');
   const [slideId] = useState<string>(slideIdParam || '1');
+  const [presentationId] = useState<number | undefined>(
+    presentationIdParam ? parseInt(presentationIdParam, 10) : undefined
+  );
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [historicalSubmissions, setHistoricalSubmissions] = useState<HistoricalSubmission[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -106,9 +101,9 @@ export default function PresenterPage() {
     const submissionTopic = `presenter/slide/${slideId}/submission`;
 
     // Subscribe to MQTT messages
-    mqttClient.subscribe(topic, (message) => {
+    mqttClient.subscribe(topic, (messageData) => {
       try {
-        const data = JSON.parse(message);
+        const data = JSON.parse(messageData);
         if (data.type === 'reference_image') {
           setReferenceImage(data.image);
         } else if (data.type === 'countdown_start') {
@@ -123,6 +118,19 @@ export default function PresenterPage() {
           message.success('Session ended. Thank you for participating!');
         } else if (data.type === 'title_update' && typeof data.title === 'string') {
           setTitle(data.title);
+        } else if (data.type === 'request_session_state') {
+          // Handle session state request from audience
+          console.log('Received session state request from audience:', data);
+          // Send current session state to the requesting audience
+          mqttClient.publish(
+            topic,
+            JSON.stringify({
+              type: 'session_state',
+              isActive: isSessionActive,
+              remainingTime: countdownTime,
+              duration: countdownTime
+            })
+          );
         }
       } catch (error) {
         console.error('Error parsing MQTT message:', error);
@@ -230,18 +238,6 @@ export default function PresenterPage() {
     return () => clearInterval(stateInterval);
   }, [isSessionActive, slideId, countdownTime]);
 
-  const endSession = () => {
-    setIsSessionActive(false);
-    setCountdownTime(null);
-    
-    mqttClient.publish(
-      `presenter/slide/${slideId}`,
-      JSON.stringify({
-        type: 'countdown_end'
-      })
-    );
-  };
-
   if (isLoading) {
     return (
       <Layout className="min-h-screen flex items-center justify-center">
@@ -291,6 +287,8 @@ export default function PresenterPage() {
                 submissions={submissions}
                 historicalSubmissions={historicalSubmissions}
                 onDeleteSubmission={handleDeleteSubmission}
+                presentationId={presentationId}
+                slideId={parseInt(slideId, 10)}
               />
             </div>
           )}

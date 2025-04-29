@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-export const BASE_URL = "http://localhost:3001/api";
-
+export const BASE_URL = 'https://duncan.ngrok.app/api'
+console.log("BASE_URL", BASE_URL);
 // Create an Axios instance with default config
 const api = axios.create({
   baseURL: BASE_URL,

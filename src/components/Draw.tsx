@@ -3,6 +3,7 @@
 import { useRef, useState, forwardRef, useImperativeHandle, useEffect } from 'react';
 import DrawingCanvas, { BrushType, DrawingCanvasHandles } from '@/components/DrawingCanvas';
 import DrawingToolbar from '@/components/DrawingToolbar';
+import DrawingHistoryToolbar from '@/components/DrawingHistoryToolbar';
 
 export interface DrawHandles {
   getDataUrl: () => string | undefined;
@@ -29,7 +30,7 @@ const Draw = forwardRef<DrawHandles, DrawProps>(({
   const canvasRef = useRef<DrawingCanvasHandles>(null);
   const [brushType, setBrushType] = useState<BrushType>('Pencil');
   const [brushColor, setBrushColor] = useState('#000000');
-  const [brushWidth, setBrushWidth] = useState(2);
+  const [brushWidth, setBrushWidth] = useState(5);
   const [dimensions, setDimensions] = useState({ width, height });
   const [isEraser, setIsEraser] = useState(false);
   const [prevBrushColor, setPrevBrushColor] = useState<string | null>(null);
@@ -129,6 +130,14 @@ const Draw = forwardRef<DrawHandles, DrawProps>(({
 
   return (
     <div ref={containerRef} className={`flex flex-col items-center w-full ${className}`}>
+      {/* History Toolbar - Moved outside canvas area */}
+      <div className="flex justify-start w-full mb-2">
+        <DrawingHistoryToolbar
+          onUndo={() => { canvasRef.current?.undo(updatePreview); updateUndoRedo(); }}
+          onRedo={() => { canvasRef.current?.redo(updatePreview); updateUndoRedo(); }}
+        />
+      </div>
+      
       <div className="flex flex-col md:flex-row items-center justify-center gap-2 w-full relative">
         {/* Canvas */}
         <div 
@@ -150,7 +159,7 @@ const Draw = forwardRef<DrawHandles, DrawProps>(({
             bgImage={referenceImage}
           />
         </div>
-        {/* Toolbar - now includes undo/redo and eraser */}
+        {/* Main Toolbar */}
         <div className="flex flex-row md:flex-col items-center mt-2 md:mt-0">
           <DrawingToolbar
             brushType={brushType}
@@ -160,12 +169,8 @@ const Draw = forwardRef<DrawHandles, DrawProps>(({
             onBrushColorChange={setBrushColor}
             onBrushWidthChange={setBrushWidth}
             onClear={() => { canvasRef.current?.clear(); updatePreview(); }}
-            onUndo={() => { canvasRef.current?.undo(updatePreview); updateUndoRedo(); }}
-            onRedo={() => { canvasRef.current?.redo(updatePreview); updateUndoRedo(); }}
             isEraser={isEraser}
             onToggleEraser={handleToggleEraser}
-            canUndo={canUndo}
-            canRedo={canRedo}
           />
         </div>
       </div>
