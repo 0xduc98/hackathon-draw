@@ -5,15 +5,21 @@ import { dirname, join } from 'path';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
+// Determine if we're in production (Vercel) or development
+const isProduction = process.env.NODE_ENV === 'production';
+
 // Create database connection
-const db = new sqlite3.Database(join(__dirname, '../database.sqlite'), (err) => {
-  if (err) {
-    console.error('Error connecting to database:', err);
-  } else {
-    console.log('Connected to SQLite database');
-    createTables();
+const db = new sqlite3.Database(
+  isProduction ? ':memory:' : join(__dirname, '../database.sqlite'),
+  (err) => {
+    if (err) {
+      console.error('Error connecting to database:', err);
+    } else {
+      console.log('Connected to SQLite database');
+      createTables();
+    }
   }
-});
+);
 
 // Create necessary tables
 function createTables() {

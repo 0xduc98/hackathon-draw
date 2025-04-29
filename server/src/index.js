@@ -10,6 +10,12 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(500).json({ error: 'Internal Server Error', details: err.message });
+});
+
 // Root route - Get user information
 app.get('/', (req, res) => {
   const userInfo = {
