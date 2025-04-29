@@ -76,26 +76,80 @@ function AudiencePageContent() {
     onMessage: (message) => {
       try {
         const data = JSON.parse(message);
-        console.log('Received MQTT message:', data);
-        if (data.type === 'reference_image') {
-          console.log('Setting reference image:', data.reference_image);
-          setReferenceImage(data.reference_image);
-        } else if (data.type === 'countdown_start') {
-          setCountdownTime(data.duration);
-          setIsSessionActive(true);
-        } else if (data.type === 'countdown_update') {
-          setCountdownTime(data.remainingTime);
-        } else if (data.type === 'countdown_end') {
-          setCountdownTime(null);
-          setIsSessionActive(false);
-        } else if (data.type === 'title_update' && typeof data.title === 'string') {
-          setTitle(data.title);
+        console.log('Audience received MQTT message:', data);
+        
+        switch (data.type) {
+          case 'reference_image':
+            console.log('Setting reference image:', data.reference_image);
+            setReferenceImage(data.reference_image);
+            break;
+            
+          case 'countdown_start':
+            console.log('Starting session with duration:', data.duration, 'remainingTime:', data.remainingTime);
+            // Use remainingTime if available, otherwise use duration
+            const initialTime = data.remainingTime !== undefined ? data.remainingTime : data.duration;
+            setCountdownTime(initialTime);
+            setIsSessionActive(true);
+            break;
+            
+          case 'countdown_update':
+            console.log('Updating countdown:', data.remainingTime);
+            if (data.remainingTime !== undefined) {
+              setCountdownTime(data.remainingTime);
+              // Ensure session is active when receiving updates
+              if (!isSessionActive) {
+                console.log('Activating session from countdown update');
+                setIsSessionActive(true);
+              }
+            } else {
+              console.warn('Received countdown update without remainingTime:', data);
+            }
+            break;
+            
+          case 'countdown_end':
+            console.log('Ending session');
+            setCountdownTime(null);
+            setIsSessionActive(false);
+            break;
+            
+          case 'session_state':
+            // Handle periodic state updates for late-joining audience members
+            console.log('Received session state:', data);
+            if (data.isActive && data.remainingTime !== undefined) {
+              console.log('Syncing session state - remaining time:', data.remainingTime);
+              setCountdownTime(data.remainingTime);
+              setIsSessionActive(true);
+            }
+            break;
+            
+          case 'title_update':
+            if (typeof data.title === 'string') {
+              console.log('Updating title:', data.title);
+              setTitle(data.title);
+            }
+            break;
+            
+          default:
+            console.log('Unknown message type:', data.type);
         }
       } catch (error) {
-        console.error('Error parsing MQTT message:', error);
+        console.error('Error parsing MQTT message:', error, 'Raw message:', message);
       }
     }
   });
+
+  // Request current session state when component mounts
+  useEffect(() => {
+    if (slideId) {
+      console.log('Requesting current session state');
+      mqttClient.publish(
+        `presenter/slide/${slideId}`,
+        JSON.stringify({
+          type: 'request_session_state'
+        })
+      );
+    }
+  }, [slideId]);
 
   useEffect(() => {
     setSubmissionSuccess(false);

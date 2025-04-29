@@ -52,16 +52,14 @@ export function SubmissionsColumn({
 
   return (
     <div className="w-full mt-8">
-      <div className="mb-4">
-        <h2 className="text-2xl font-bold text-gray-800">Submissions</h2>
-      </div>
+
       
       {allSubmissions.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
           {allSubmissions.map((submission) => (
             <div 
               key={submission.id} 
-              className="relative bg-white rounded-lg shadow p-4 flex flex-col items-center group hover:shadow-lg transition-shadow duration-200"
+              className="relative rounded-lg  p-4 flex flex-col items-center group hover:shadow-lg "
             >
               <img
                 src={submission.image}
@@ -71,11 +69,7 @@ export function SubmissionsColumn({
               />
               <div className="w-full text-center">
                 <div className="font-medium text-gray-800">{submission.audienceName}</div>
-                <div className="text-xs text-gray-500 flex items-center justify-center gap-1">
-                  <UserOutlined className="mr-1" /> {submission.audienceId}
-                </div>
               </div>
-              {submission.isCurrent && (
                 <button
                   className="absolute top-2 right-2 text-red-500 hover:text-red-700 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
                   title="Delete"
@@ -83,7 +77,6 @@ export function SubmissionsColumn({
                 >
                   <DeleteOutlined />
                 </button>
-              )}
             </div>
           ))}
         </div>

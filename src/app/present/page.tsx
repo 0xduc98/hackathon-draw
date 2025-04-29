@@ -75,6 +75,7 @@ export default function PresenterPage() {
             image_data: drawing.image_data,
             created_at: drawing.created_at
           })));
+          setShowAnswer(true)
         }
         
         // Subscribe to MQTT updates
@@ -90,6 +91,7 @@ export default function PresenterPage() {
     initializeSlide();
   }, [slideId, fetchSlideData, updateSlideData]);
 
+  
   // Handle MQTT messages for audience images
   useEffect(() => {
     if (!slideId) {
@@ -160,15 +162,16 @@ export default function PresenterPage() {
 
   const startSession = () => {
     setIsSessionActive(true);
-    let remainingTime = countdownTime;
+    let remainingTime = countdownTime || 60; // Use countdownTime if set, otherwise default to 60
     setCountdownTime(remainingTime);
 
-    // Publish session start message
+    // Publish session start message with the correct duration
     mqttClient.publish(
       `presenter/slide/${slideId}`,
       JSON.stringify({
         type: 'countdown_start',
-        duration: countdownTime
+        duration: remainingTime,
+        remainingTime: remainingTime
       })
     );
 
@@ -176,12 +179,13 @@ export default function PresenterPage() {
       remainingTime -= 1;
       setCountdownTime(remainingTime);
       
-      // Publish countdown update
+      // Publish countdown update with consistent structure
       mqttClient.publish(
         `presenter/slide/${slideId}`,
         JSON.stringify({
           type: 'countdown_update',
-          remainingTime
+          duration: remainingTime,
+          remainingTime: remainingTime
         })
       );
 
@@ -192,7 +196,8 @@ export default function PresenterPage() {
         mqttClient.publish(
           `presenter/slide/${slideId}`,
           JSON.stringify({
-            type: 'countdown_end'
+            type: 'countdown_end',
+            remainingTime: 0
           })
         );
       }
@@ -202,6 +207,28 @@ export default function PresenterPage() {
     const intervalId = interval;
     return () => clearInterval(intervalId);
   };
+
+  // Add periodic state broadcast for late-joining audience members
+  useEffect(() => {
+    if (!isSessionActive || !slideId) return;
+
+    // Broadcast current state every 5 seconds
+    const stateInterval = setInterval(() => {
+      if (countdownTime !== null) {
+        mqttClient.publish(
+          `presenter/slide/${slideId}`,
+          JSON.stringify({
+            type: 'session_state',
+            isActive: true,
+            remainingTime: countdownTime,
+            duration: countdownTime
+          })
+        );
+      }
+    }, 5000);
+
+    return () => clearInterval(stateInterval);
+  }, [isSessionActive, slideId, countdownTime]);
 
   const endSession = () => {
     setIsSessionActive(false);
