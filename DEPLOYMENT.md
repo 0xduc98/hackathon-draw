@@ -127,6 +127,12 @@ Ensure your project has the following structure:
    - Verify countdown timer functionality
    - Check image upload and display
 
+4. Configure AWS S3:
+   - Verify S3 bucket is accessible
+   - Test file upload functionality
+   - Ensure CORS is properly configured on the S3 bucket
+   - Check image loading from S3 URLs
+
 ### 5. Troubleshooting
 
 Common issues specific to the frontend:
@@ -145,6 +151,13 @@ Common issues specific to the frontend:
    - Check for TypeScript errors
    - Verify all dependencies are installed
    - Ensure environment variables are set
+
+4. S3 Upload Issues:
+   - Verify S3 bucket name and region
+   - Check if S3 bucket CORS allows uploads from your domain
+   - Ensure file size is within limits
+   - Verify file types are allowed
+   - Check network connectivity to S3
 
 ### 6. Maintenance
 
@@ -184,4 +197,150 @@ For additional support:
 
 ## Backend Deployment
 
-For deploying the backend server, please refer to the [Server Deployment Guide](./server/DEPLOYMENT.md). 
+For deploying the backend server, please refer to the [Server Deployment Guide](./server/DEPLOYMENT.md).
+
+### AWS S3 Configuration Guide
+
+#### 1. S3 Bucket Setup
+
+1. Create an S3 bucket:
+   ```bash
+   aws s3 mb s3://your-bucket-name --region your-aws-region
+   ```
+
+2. Configure bucket for public access (if needed):
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Sid": "PublicReadGetObject",
+         "Effect": "Allow",
+         "Principal": "*",
+         "Action": "s3:GetObject",
+         "Resource": "arn:aws:s3:::your-bucket-name/*"
+       }
+     ]
+   }
+   ```
+
+3. Configure CORS for the bucket:
+   ```json
+   {
+     "CORSRules": [
+       {
+         "AllowedHeaders": ["*"],
+         "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
+         "AllowedOrigins": [
+           "https://your-frontend-domain.vercel.app",
+           "http://localhost:3000"
+         ],
+         "ExposeHeaders": ["ETag"],
+         "MaxAgeSeconds": 3000
+       }
+     ]
+   }
+   ```
+
+#### 2. File Upload Implementation
+
+1. Install AWS SDK:
+   ```bash
+   npm install @aws-sdk/client-s3
+   ```
+
+2. Create S3 client configuration:
+   ```typescript
+   // src/utils/s3Config.ts
+   import { S3Client } from '@aws-sdk/client-s3';
+
+   export const s3Client = new S3Client({
+     region: process.env.NEXT_PUBLIC_S3_REGION,
+     credentials: {
+       accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+     },
+   });
+   ```
+
+3. Implement file upload function:
+   ```typescript
+   // src/utils/uploadToS3.ts
+   import { PutObjectCommand } from '@aws-sdk/client-s3';
+   import { s3Client } from './s3Config';
+
+   export async function uploadToS3(
+     file: File,
+     folder: string = 'uploads'
+   ): Promise<string> {
+     const fileExtension = file.name.split('.').pop();
+     const fileName = `${folder}/${Date.now()}.${fileExtension}`;
+
+     const command = new PutObjectCommand({
+       Bucket: process.env.NEXT_PUBLIC_S3_BUCKET_NAME,
+       Key: fileName,
+       Body: file,
+       ContentType: file.type,
+     });
+
+     try {
+       await s3Client.send(command);
+       return `${process.env.NEXT_PUBLIC_S3_URL}/${fileName}`;
+     } catch (error) {
+       console.error('Error uploading to S3:', error);
+       throw error;
+     }
+   }
+   ```
+
+4. Usage in components:
+   ```typescript
+   // src/components/ImageUpload.tsx
+   import { uploadToS3 } from '../utils/uploadToS3';
+
+   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+     const file = event.target.files?.[0];
+     if (!file) return;
+
+     try {
+       const imageUrl = await uploadToS3(file, 'images');
+       // Use the imageUrl in your application
+     } catch (error) {
+       console.error('Upload failed:', error);
+     }
+   };
+   ```
+
+#### 3. Security Best Practices
+
+1. File Validation:
+   - Implement file type checking
+   - Set maximum file size limits
+   - Sanitize file names
+   - Use secure file extensions
+
+2. Access Control:
+   - Use pre-signed URLs for private files
+   - Implement user authentication
+   - Set appropriate bucket policies
+   - Use IAM roles with least privilege
+
+3. Performance Optimization:
+   - Implement client-side image compression
+   - Use CDN for faster delivery
+   - Enable bucket versioning
+   - Implement proper caching headers
+
+#### 4. Error Handling
+
+1. Common S3 Errors:
+   - AccessDenied: Check IAM permissions
+   - NoSuchBucket: Verify bucket name
+   - InvalidAccessKeyId: Check credentials
+   - SignatureDoesNotMatch: Verify secret key
+
+2. Error Recovery:
+   - Implement retry logic
+   - Provide user feedback
+   - Log errors for debugging
+   - Handle network issues gracefully 

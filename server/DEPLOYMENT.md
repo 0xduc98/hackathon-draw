@@ -163,7 +163,7 @@ The server provides these main endpoints:
 
 3. Image Management:
    ```
-   POST /api/images - Upload image
+   POST /api/images - Upload image to S3
    GET /api/images/:imageId - Get image
    ```
 
